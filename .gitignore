@@ -1,1 +1,5 @@
 .venv/
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
