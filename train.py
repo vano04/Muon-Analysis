@@ -6,6 +6,7 @@ from time import perf_counter
 
 import cupy as cp
 import matplotlib
+import numpy as np
 from tqdm.auto import tqdm
 
 matplotlib.use("Agg")
@@ -195,6 +196,10 @@ def _generate_train_block(teacher: Teacher, config: Config, start_step: int, blo
 	return tokens.reshape(block_steps, config.B_train, config.T)
 
 
+def _train_tokens_path(artifact_dir: Path, train_seed: int) -> Path:
+	return artifact_dir / "train_tokens" / f"seed_{int(train_seed)}.npy"
+
+
 class _TrainBatchPrefetcher:
 	def __init__(self, teacher: Teacher, config: Config):
 		self.teacher = teacher
@@ -286,7 +291,41 @@ class _PrecomputedTrainBatchSource:
 			self.executor.shutdown(wait=True, cancel_futures=True)
 
 
-def _make_train_batch_source(teacher: Teacher, config: Config):
+class _DiskTrainBatchSource:
+	def __init__(self, tokens_path: Path, config: Config):
+		self.config = config
+		self.tokens_path = tokens_path
+		self.block_size = max(1, min(config.train_batch_block_size, config.steps))
+		self.train_tokens = np.load(tokens_path, mmap_mode="r")
+		expected_shape = (int(config.steps), int(config.B_train), int(config.T))
+		if tuple(self.train_tokens.shape) != expected_shape:
+			raise ValueError(f"Train token shape mismatch for {tokens_path}: {self.train_tokens.shape} != {expected_shape}")
+		self.current_block = None
+		self.current_start_step = None
+
+	def _load_block(self, start_step: int):
+		block_steps = min(self.block_size, self.config.steps - start_step + 1)
+		cpu_block = self.train_tokens[start_step - 1:start_step - 1 + block_steps]
+		self.current_block = cp.asarray(cpu_block)
+		self.current_start_step = start_step
+
+	def get(self, step: int):
+		if self.current_block is None or self.current_start_step is None or not (self.current_start_step <= step < self.current_start_step + self.current_block.shape[0]):
+			self._load_block(step)
+
+		local_index = step - self.current_start_step
+		return self.current_block[local_index]
+
+	def close(self):
+		self.current_block = None
+		self.current_start_step = None
+		self.train_tokens = None
+
+
+def _make_train_batch_source(teacher: Teacher, config: Config, artifact_dir: Path):
+	tokens_path = _train_tokens_path(artifact_dir, config.train_seed)
+	if tokens_path.exists():
+		return _DiskTrainBatchSource(tokens_path, config)
 	if config.train_data_mode == "precomputed":
 		return _PrecomputedTrainBatchSource(teacher, config)
 	return _TrainBatchPrefetcher(teacher, config)
@@ -527,9 +566,10 @@ def train_run(
 	rows = []
 	log_every = config.log_every
 	flush_every = config.step_log_flush_every
+	flush_every_effective = 1 if not show_progress else flush_every
 	step_log_handle, step_log_writer = _make_step_log_writer(run_dir / "step_log.csv")
 	eval_log_handle, eval_log_writer = _make_eval_log_writer(run_dir / "eval_log.csv")
-	batch_source = _make_train_batch_source(teacher, config)
+	batch_source = _make_train_batch_source(teacher, config, artifact_dir)
 	status = "ok"
 	non_finite_step = None
 	steps_completed = 0
@@ -607,7 +647,7 @@ def train_run(
 				"grad_norm": _format_csv_metric(train_metrics["grad_norm"]),
 				"param_norm": _format_csv_metric(param_norm),
 			})
-			if step % flush_every == 0 or evaluated or printed:
+			if step % flush_every_effective == 0 or evaluated or printed:
 				step_log_handle.flush()
 
 			val_metrics = None

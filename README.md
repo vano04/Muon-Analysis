@@ -10,7 +10,8 @@ CuPy-only teacher-student autoregressive MLP experiments for comparing AdamW and
 - `build_teacher_eval.py`: build a fixed teacher plus validation/test sets for a single tier
 - `train.py`: run one optimizer/lr/wd/seed trial against shared tier artifacts
 - `eval.py`: evaluate a saved trial on the fixed validation or test split
-- `experiment.py`: run the full multi-tier AdamW-vs-Muon benchmark with tuning and repeated seeds
+- `experiment1.py`: run the full multi-tier AdamW-vs-Muon benchmark with tuning and repeated seeds
+- `experiment2.py`: run the AdamW-vs-Muon-hybrid benchmark variant
 - `results/`: generated teachers, trial logs, plots, summaries, and reports
 
 ## Example
@@ -18,19 +19,19 @@ CuPy-only teacher-student autoregressive MLP experiments for comparing AdamW and
 Run the full suite:
 
 ```bash
-python experiment.py --config configs/benchmark_suite.json
+python experiment1.py --config configs/benchmark_suite.json
 ```
 
 Run one tier only:
 
 ```bash
-python experiment.py --config configs/benchmark_medium.json
+python experiment1.py --config configs/benchmark_medium.json
 ```
 
 Run a smoke benchmark:
 
 ```bash
-python experiment.py --config configs/smoke.json
+python experiment1.py --config configs/smoke.json
 ```
 
 Single-trial utilities remain available when you want to inspect one exact setting:
@@ -43,8 +44,10 @@ python eval.py --config configs/benchmark_500m_bf16_adamw.json --run-name legacy
 
 Multi process execution:
 ```bash
-python experiment.py --config benchmark_suite.json --max-parallel-trials 3 --force
+python experiment1.py --config benchmark_suite.json --max-parallel-trials 3 --force
 ```
+
+`experiment.py` remains as a compatibility shim that forwards to `experiment1.py`.
 
 ## Benchmark Structure
 
@@ -60,6 +63,10 @@ The experiment runner selects hyperparameters using validation distillation loss
 ## Threading
 
 Tier configs accept `num_threads` to enable a small amount of safe multithreading. When `num_threads > 1`, training uses a background thread to prefetch the next teacher batch and uses extra threads for plot generation.
+
+## Train Stream Reuse
+
+During `experiment.py` runs, each tier now pre-generates train token streams once per repeat seed and saves them under `train_tokens/seed_<train_seed>.npy` inside the tier folder. All optimizer/lr/wd trials for that repeat reuse the same saved stream, removing per-trial teacher sampling overhead while preserving the same deterministic training data.
 
 ## Dtypes
 

@@ -1,7 +1,10 @@
 import argparse
+import os
 from pathlib import Path
+import tempfile
 
 import cupy as cp
+import numpy as np
 
 from muon_analysis.config import Config
 from muon_analysis.dtypes import resolve_dtype
@@ -32,6 +35,113 @@ def _build_split_tokens(teacher: Teacher, config: Config, split: str) -> cp.ndar
         bos_id=config.bos_id,
         temperature=config.temperature,
     )
+
+
+def train_tokens_path(artifact_dir: Path, train_seed: int) -> Path:
+    return artifact_dir / "train_tokens" / f"seed_{int(train_seed)}.npy"
+
+
+def _validate_existing_train_tokens_shape(path: Path, config: Config):
+    cached = np.load(path, mmap_mode="r")
+    expected_shape = (int(config.steps), int(config.B_train), int(config.T))
+    assert cached.shape == expected_shape, f"Train tokens shape mismatch at {path}: {cached.shape} != {expected_shape}"
+    assert cached.dtype == np.int32, f"Train tokens dtype mismatch at {path}: {cached.dtype} != int32"
+
+
+def _verify_existing_train_tokens_head(teacher: Teacher, config: Config, path: Path, train_seed: int):
+    cached = np.load(path, mmap_mode="r")
+    if cached.shape[0] == 0:
+        return
+    expected_step_one = teacher.generate_sequences(
+        config.B_train,
+        config.T,
+        seed=int(train_seed) + 1,
+        prefix_mode=config.prefix_mode,
+        bos_id=config.bos_id,
+        temperature=config.temperature,
+    )
+    cp.cuda.get_current_stream().synchronize()
+    assert np.array_equal(cached[0], cp.asnumpy(expected_step_one)), f"Train tokens first step mismatch at {path}"
+
+
+def _write_train_tokens_file(teacher: Teacher, config: Config, path: Path, train_seed: int):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=path.suffix)
+    os.close(fd)
+
+    try:
+        mmap = np.lib.format.open_memmap(
+            tmp_path,
+            mode="w+",
+            dtype=np.int32,
+            shape=(int(config.steps), int(config.B_train), int(config.T)),
+        )
+        block_size = max(1, min(int(config.train_batch_block_size), int(config.steps)))
+        for start_step in range(1, int(config.steps) + 1, block_size):
+            block_steps = min(block_size, int(config.steps) - start_step + 1)
+            total_batch = int(config.B_train * block_steps)
+            tokens = teacher.generate_sequences(
+                total_batch,
+                config.T,
+                seed=int(train_seed) + start_step,
+                prefix_mode=config.prefix_mode,
+                bos_id=config.bos_id,
+                temperature=config.temperature,
+            )
+            cp.cuda.get_current_stream().synchronize()
+            mmap[start_step - 1:start_step - 1 + block_steps] = cp.asnumpy(tokens.reshape(block_steps, config.B_train, config.T))
+
+        mmap.flush()
+        del mmap
+        os.replace(tmp_path, path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def build_train_tokens(
+    config: Config,
+    artifact_dir: Path,
+    train_seeds: list[int],
+    force: bool = False,
+    verify_existing: bool = False,
+    progress_callback=None,
+):
+    teacher_state = load_npz(artifact_dir / "teacher_weights.npz")
+    teacher = Teacher(
+        config.V,
+        config.K,
+        config.width,
+        config.layers,
+        activation=config.activation,
+        dtype=resolve_dtype(config.dtype),
+        params=teacher_state,
+    )
+
+    manifest = []
+    total = len(train_seeds)
+    for seed_index, train_seed in enumerate(train_seeds, start=1):
+        path = train_tokens_path(artifact_dir, train_seed)
+        if progress_callback is not None:
+            progress_callback(seed_index, total, int(train_seed), "checking")
+        if path.exists() and not force:
+            _validate_existing_train_tokens_shape(path, config)
+            if verify_existing:
+                _verify_existing_train_tokens_head(teacher, config, path, train_seed)
+            if progress_callback is not None:
+                progress_callback(seed_index, total, int(train_seed), "existing")
+            manifest.append({"train_seed": int(train_seed), "path": str(path), "status": "existing"})
+            continue
+
+        if progress_callback is not None:
+            progress_callback(seed_index, total, int(train_seed), "writing")
+        _write_train_tokens_file(teacher, config, path, train_seed)
+        if progress_callback is not None:
+            progress_callback(seed_index, total, int(train_seed), "written")
+        manifest.append({"train_seed": int(train_seed), "path": str(path), "status": "written"})
+
+    save_json(artifact_dir / "train_tokens_manifest.json", {"entries": manifest})
+    return manifest
 
 
 def build_teacher_and_eval(config: Config, artifact_dir: Path, verify_existing: bool = False):
