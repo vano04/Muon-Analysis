@@ -1,5 +1,9 @@
 .venv/
+*.pyc
+__pycache__/
 # Jupyter notebooks
 *.ipynb
 .ipynb_checkpoints/
 **/.ipynb_checkpoints/
+results/
+resultsold/
