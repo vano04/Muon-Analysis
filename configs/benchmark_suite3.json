@@ -1,5 +1,5 @@
 {
-  "run_name": "adamw_vs_muon_suite2",
+  "run_name": "adamw_vs_muon_suite3",
   "optimizers": ["adamw", "muon"],
   "output_root": "results",
   "tuning": {

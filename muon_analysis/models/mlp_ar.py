@@ -39,16 +39,24 @@ class MLP_AR:
         a = sqrt(6.0 / (fan_in + fan_out)) # only needed once so no need for gpu
         return rng.uniform(-a, a, size=shape).astype(dtype, copy=False)
 
+    @staticmethod
+    def _kaiming_uniform(rng, shape, fan_in, dtype, gain=sqrt(2.0)):
+        # Fan-in preserving init for ReLU/GELU hidden stacks to avoid signal collapse at depth.
+        a = sqrt(3.0) * gain / sqrt(float(fan_in))
+        return rng.uniform(-a, a, size=shape).astype(dtype, copy=False)
+
     def _init_params(self, seed: int):
         rng = cp.random.default_rng(int(seed))
 
         Ws = []
-        #W1
-        Ws.append(self._xavier_uniform(rng, (self.in_dim, self.m), self.in_dim, self.m, self.dtype))
+        hidden_gain = sqrt(2.0) if self.activation_name in ("relu", "gelu") else 1.0
+        # W1
+        Ws.append(self._kaiming_uniform(rng, (self.in_dim, self.m), self.in_dim, self.dtype, gain=hidden_gain))
         # W2...WL (if L>1)
         for _ in range(self.L - 1):
-            Ws.append(self._xavier_uniform(rng, (self.m, self.m), self.m, self.m, self.dtype))
+            Ws.append(self._kaiming_uniform(rng, (self.m, self.m), self.m, self.dtype, gain=hidden_gain))
 
+        # Keep Xavier at the output projection for balanced output scale across vocab size.
         Wout = self._xavier_uniform(rng, (self.m, self.V), self.m, self.V, self.dtype)
 
         self.Ws = Ws

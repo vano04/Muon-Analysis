@@ -13,6 +13,60 @@ from muon_analysis.models.model_utils import ctx_to_onehot_concat
 from muon_analysis.models.teacher import Teacher
 
 
+def _teacher_signal_stats(teacher: Teacher, tokens: cp.ndarray, config: Config, dtype, max_windows: int = 65536) -> dict:
+    from muon_analysis.models.model_utils import make_windows, stable_softmax
+
+    ctx, _ = make_windows(tokens, config.K)
+    if ctx.shape[0] > max_windows:
+        ctx = ctx[:max_windows]
+
+    u = ctx_to_onehot_concat(ctx, config.V, dtype)
+    logits = teacher.forward_logits(u).astype(cp.float32, copy=False)
+    probs = stable_softmax(logits / float(config.temperature), axis=1)
+
+    max_prob = cp.max(probs, axis=1)
+    entropy = -cp.sum(probs * cp.log(cp.clip(probs, 1e-12, 1.0)), axis=1)
+    logit_rms = cp.sqrt(cp.mean(logits * logits, axis=1))
+    ln_vocab = cp.log(cp.asarray(config.V, dtype=cp.float32))
+
+    mean_entropy = float(cp.mean(entropy).get())
+    mean_max_prob = float(cp.mean(max_prob).get())
+    mean_logit_rms = float(cp.mean(logit_rms).get())
+    uniform_entropy = float(ln_vocab.get())
+    entropy_gap = uniform_entropy - mean_entropy
+    max_prob_ratio_to_uniform = mean_max_prob / (1.0 / float(config.V))
+
+    return {
+        "window_count": int(ctx.shape[0]),
+        "mean_entropy": mean_entropy,
+        "uniform_entropy": uniform_entropy,
+        "entropy_gap": float(entropy_gap),
+        "mean_max_prob": mean_max_prob,
+        "max_prob_ratio_to_uniform": float(max_prob_ratio_to_uniform),
+        "mean_logit_rms": mean_logit_rms,
+    }
+
+
+def _assert_teacher_signal_quality(stats: dict, config: Config):
+    min_entropy_gap = 1e-4
+    min_max_prob_ratio = 1.04
+    min_logit_rms = 1e-3
+
+    if (
+        stats["entropy_gap"] < min_entropy_gap
+        or stats["max_prob_ratio_to_uniform"] < min_max_prob_ratio
+        or stats["mean_logit_rms"] < min_logit_rms
+    ):
+        raise ValueError(
+            "Teacher soft targets are too close to uniform; distillation signal is likely too weak for optimizer benchmarking. "
+            f"tier={config.tier_name}, V={config.V}, temperature={config.temperature}, "
+            f"entropy_gap={stats['entropy_gap']:.6g} (min {min_entropy_gap}), "
+            f"max_prob_ratio={stats['max_prob_ratio_to_uniform']:.6g} (min {min_max_prob_ratio}), "
+            f"mean_logit_rms={stats['mean_logit_rms']:.6g} (min {min_logit_rms}). "
+            "Try lower temperature, different teacher seed, or stronger teacher initialization scale."
+        )
+
+
 def _param_shapes(state_dict: dict) -> dict:
     return {key: list(value.shape) for key, value in state_dict.items()}
 
@@ -168,6 +222,8 @@ def build_teacher_and_eval(config: Config, artifact_dir: Path, verify_existing: 
     test_hist = cp.bincount(test_tokens.reshape(-1), minlength=config.V)
     assert int((validation_hist > 0).sum().get()) > 1, "Validation set token histogram is degenerate"
     assert int((test_hist > 0).sum().get()) > 1, "Test set token histogram is degenerate"
+    teacher_signal = _teacher_signal_stats(teacher, validation_tokens, config, dtype)
+    _assert_teacher_signal_quality(teacher_signal, config)
 
     artifact_dir.mkdir(parents=True, exist_ok=True)
     teacher_path = artifact_dir / "teacher_weights.npz"
@@ -182,6 +238,7 @@ def build_teacher_and_eval(config: Config, artifact_dir: Path, verify_existing: 
         "teacher_param_shapes": _param_shapes(state_dict),
         "validation_token_histogram": cp.asnumpy(validation_hist).tolist(),
         "test_token_histogram": cp.asnumpy(test_hist).tolist(),
+        "teacher_signal": teacher_signal,
     }
 
     meta = {
