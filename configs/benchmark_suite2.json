@@ -41,7 +41,7 @@
       "layers": 8,
       "activation": "gelu",
       "dtype": "bf16",
-      "temperature": 1.0,
+      "temperature": 0.5,
       "prefix_mode": "bos",
       "bos_id": 0,
       "teacher_seed": 321,
