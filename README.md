@@ -28,6 +28,10 @@ Run the full suite (For same the results as report):
 ```bash
 python experiment1.py --config configs/benchmark_full.json
 ```
+To validate that Muon vs Muon Hybrid have no difference with the current model:
+```bash
+python experiment2.py --config configs/benchmark_suite1.json
+```
 
 Run one tier only:
 
