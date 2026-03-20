@@ -2,22 +2,24 @@
 
 CuPy-only teacher-student autoregressive MLP experiments for comparing AdamW and Muon without PyTorch.
 
-Install required packages with:
+You will need a CUDA or ROCm compatible GPU with >8gb of vram to run the full benchmark.
+
+Install required packages with (Please check requirements.txt first and adjust the cupy package for your specific wheel):
 ```bash
 pip install -r requirements.txt
 ```
 
 ## Layout
 
-- `muon_analysis/`: reusable package code
+- `muon_analysis/`: Main core OOP style code, contains optimizers and other utilities
 - `muon_analysis/models/`: bias-free autoregressive MLP, teacher, student, and model utilities
-- `configs/`: checked-in benchmark suite configs for smoke, small, medium, large, and the full suite
+- `configs/`: benchmark suite configs
 - `build_teacher_eval.py`: build a fixed teacher plus validation/test sets for a single tier
 - `train.py`: run one optimizer/lr/wd/seed trial against shared tier artifacts
 - `eval.py`: evaluate a saved trial on the fixed validation or test split
-- `experiment1.py`: run the full multi-tier AdamW-vs-Muon benchmark with tuning and repeated seeds
-- `experiment2.py`: run the AdamW-vs-Muon-hybrid benchmark variant
-- `results/`: generated teachers, trial logs, plots, summaries, and reports
+- `experiment1.py`: For running experiment configurations on AdamW v.s. Pure Muon
+- `experiment2.py`: For running experiment configurations on AdamW v.s. Hybrid Muon
+- `results/`: generated teachers, trial logs, and plots
 
 ## Example
 
@@ -47,12 +49,12 @@ python train.py --config configs/benchmark_500m_bf16_adamw.json --run-name legac
 python eval.py --config configs/benchmark_500m_bf16_adamw.json --run-name legacy_single_trial --split test
 ```
 
-Multi process execution:
+Multi process execution (Only run the full benchmark suite with this if your GPU has >=32gb of VRAM):
 ```bash
 python experiment1.py --config benchmark_suite.json --max-parallel-trials 3 --force
 ```
 
-`experiment.py` remains as a compatibility shim that forwards to `experiment1.py`.
+Remove `--force` to continue tier wise and use `--force` if you want to recompute everything.
 
 ## Benchmark Structure
 
