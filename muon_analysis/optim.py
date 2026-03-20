@@ -14,7 +14,7 @@ def _float32_view(array):
     return array.astype(cp.float32, copy=False)
 
 
-def newton_schulz5_mp(G, steps=3, eps=1e-7, state_dtype=None):
+def newton_schulz(G, steps=3, eps=1e-7, state_dtype=None):
     a, b, c = 3.4445, -4.7750, 2.0315
 
     if state_dtype is None:
@@ -105,7 +105,7 @@ class Muon:
             momentum_buffer *= self.mu
             momentum_buffer += grad32
             update_source = grad32 + self.mu * momentum_buffer if self.nesterov else momentum_buffer
-            update = newton_schulz5_mp(update_source, steps=self.ns_steps, eps=self.eps, state_dtype=self.ns_state_dtype)
+            update = newton_schulz(update_source, steps=self.ns_steps, eps=self.eps, state_dtype=self.ns_state_dtype)
             step_scale = cp.float32(self.lr * _muon_update_scale(param.shape))
 
             if self.weight_decay != 0.0:
