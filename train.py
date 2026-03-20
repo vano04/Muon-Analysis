@@ -5,12 +5,9 @@ from pathlib import Path
 from time import perf_counter
 
 import cupy as cp
-import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 from tqdm.auto import tqdm
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 from muon_analysis.config import Config
 from muon_analysis.dtypes import resolve_dtype
@@ -22,6 +19,7 @@ from muon_analysis.optim import build_optimizer
 
 
 def _state_to_params(student: Student):
+	# Flat parameter view expected by optimizer implementations.
 	return [*student.Ws, student.Wout]
 
 
@@ -58,6 +56,7 @@ def _run_models(student: Student, teacher: Teacher, tokens: cp.ndarray, temperat
 	u = ctx_to_onehot_concat(ctx, student.V, student.dtype)
 	teacher_logits = teacher.forward_logits(u)
 	student_logits = student.forward_logits(u)
+	# Distillation target distribution (teacher) at configured temperature.
 	teacher_scaled = teacher_logits.astype(cp.float32, copy=False) / temperature
 	teacher_probs = stable_softmax(teacher_scaled, axis=1)
 	return {
@@ -113,6 +112,7 @@ def _forward_backward(
 	grad_logits = (student_probs - teacher_probs) / (logits.shape[0] * temperature)
 
 	grads = [None] * (len(student.Ws) + 1)
+	# Backprop through output projection then hidden stack.
 	grads[-1] = hidden_inputs[-1].T @ grad_logits
 	grad_h = grad_logits @ student.Wout.T
 
@@ -324,6 +324,7 @@ class _DiskTrainBatchSource:
 
 def _make_train_batch_source(teacher: Teacher, config: Config, artifact_dir: Path):
 	tokens_path = _train_tokens_path(artifact_dir, config.train_seed)
+	# Prefer disk replay when available for deterministic reruns.
 	if tokens_path.exists():
 		return _DiskTrainBatchSource(tokens_path, config)
 	if config.train_data_mode == "precomputed":
@@ -446,50 +447,6 @@ def _plot_time_metric(run_dir: Path, rows: list[dict], filename: str):
 	plt.close()
 
 
-def _write_report(run_dir: Path, config: Config, teacher: Teacher, student: Student, summary: dict):
-	random_ce = float(cp.log(cp.asarray(config.V, dtype=cp.float32)).get())
-	random_acc = 1.0 / config.V
-	lines = [
-		f"# Trial {config.tier_name} {config.optimizer}",
-		"",
-		"## Config",
-		"",
-		f"- tier={config.tier_name}",
-		f"- optimizer={config.optimizer}",
-		f"- lr={config.lr}",
-		f"- weight_decay={config.weight_decay}",
-		f"- student_seed={config.student_seed}, train_seed={config.train_seed}",
-		f"- width={config.width}, layers={config.layers}, V={config.V}, K={config.K}, T={config.T}",
-		"",
-		"## Baseline",
-		"",
-		f"- random CE baseline={random_ce:.6f}",
-		f"- random accuracy baseline={random_acc:.6f}",
-		"",
-		"## Parameters",
-		"",
-		f"- teacher count={teacher.parameter_count()}",
-		f"- student count={student.parameter_count()}",
-		"",
-		"## Summary",
-		"",
-		f"- status={summary['status']}",
-		f"- steps_completed={summary['steps_completed']}",
-		f"- best validation distill CE={summary['best_validation']['distill_ce']:.6f} at step {summary['best_validation']['step']}",
-		f"- final validation distill CE={summary['final_validation']['distill_ce']:.6f}",
-		f"- final test distill CE={summary['final_test']['distill_ce']:.6f}",
-		"",
-		"## Plots",
-		"",
-		"![Train vs Validation Distillation CE](plots_distill_ce.png)",
-		"",
-		"![Train vs Validation Accuracy](plots_accuracy.png)",
-		"",
-		"![Validation Distillation CE vs Time](plots_validation_time.png)",
-	]
-	(run_dir / "report.md").write_text("\n".join(lines), encoding="utf-8")
-
-
 def _write_analysis_artifacts(run_dir: Path, config: Config, teacher: Teacher, student: Student, summary: dict, rows: list[dict]):
 	plot_jobs = [
 		(_plot_metric, (run_dir, rows, "train_distill_ce", "val_distill_ce", "Distillation CE", "plots_distill_ce.png")),
@@ -506,8 +463,6 @@ def _write_analysis_artifacts(run_dir: Path, config: Config, teacher: Teacher, s
 	else:
 		for job, args in plot_jobs:
 			job(*args)
-
-	_write_report(run_dir, config, teacher, student, summary)
 
 
 def _all_finite(student: Student, grads: list[cp.ndarray]) -> bool:
@@ -601,6 +556,7 @@ def train_run(
 			evaluated = step % config.eval_every == 0 or step == 1 or step == config.steps
 			printed = step == 1 or step == config.steps or step % log_every == 0
 			finite_checked = step == 1 or evaluated or step % config.finite_check_every == 0
+			# Skip expensive metrics unless they are needed for logging/checks.
 			collect_heavy_metrics = evaluated or printed or finite_checked
 
 			tokens = batch_source.get(step)

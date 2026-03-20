@@ -5,12 +5,14 @@ from muon_analysis.models.model_utils import accuracy_from_logits, cross_entropy
 
 
 class Student(MLP_AR):
+	# Token-level CE against next-token ground truth.
 	def loss_on_tokens(self, tokens):
 		ctx, y = make_windows(tokens, self.K)
 		u = ctx_to_onehot_concat(ctx, self.V, self.dtype)
 		logits = self.forward_logits(u)
 		return cross_entropy_from_logits(logits, y)
 
+	# Convenience metrics used by quick checks and reports.
 	def metrics_on_tokens(self, tokens):
 		ctx, y = make_windows(tokens, self.K)
 		u = ctx_to_onehot_concat(ctx, self.V, self.dtype)

@@ -22,6 +22,7 @@ def evaluate_saved_student(config: Config, artifact_dir: Path, run_dir: Path | N
 	else:
 		raise ValueError(f"Unsupported split {split}")
 
+	# Rebuild both models from saved weights for deterministic evaluation.
 	teacher = Teacher(
 		config.V,
 		config.K,
@@ -41,6 +42,7 @@ def evaluate_saved_student(config: Config, artifact_dir: Path, run_dir: Path | N
 		params=student_state,
 	)
 
+	# Reuse the same evaluator as training for metric consistency.
 	metrics = evaluate_student(student, teacher, tokens, config.temperature)
 	save_json(run_dir / f"eval_{split}.json", metrics)
 	return metrics

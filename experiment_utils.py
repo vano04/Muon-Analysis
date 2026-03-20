@@ -5,11 +5,8 @@ from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from pathlib import Path
 from time import perf_counter
 
-import matplotlib
-from tqdm.auto import tqdm
-
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
 
 from build_teacher_eval import build_teacher_and_eval, build_train_tokens
 from eval import evaluate_saved_student
@@ -223,55 +220,6 @@ def _plot_overall_test_loss(run_dir: Path, tier_summaries: list[dict], optimizer
     plt.tight_layout()
     plt.savefig(run_dir / "plot_final_test_loss_by_tier.png", dpi=160)
     plt.close()
-
-
-def _write_tier_report(tier_dir: Path, tier_summary: dict):
-    lines = [
-        f"# Tier {tier_summary['tier']}",
-        "",
-        "## Best Hyperparameters",
-        "",
-    ]
-    for optimizer, summary in tier_summary["best_configs"].items():
-        lines.append(
-            f"- {optimizer}: lr={summary['lr']}, weight_decay={summary['weight_decay']}, "
-            f"best validation distill CE={summary['best_validation_distill_ce_mean']:.6f} +/- {summary['best_validation_distill_ce_std']:.6f}, "
-            f"final test distill CE={summary['final_test_distill_ce_mean']:.6f} +/- {summary['final_test_distill_ce_std']:.6f}, "
-            f"diverged_runs={summary['diverged_runs']}"
-        )
-    lines.extend([
-        "",
-        "## Artifacts",
-        "",
-        "- plot_validation_vs_step.png",
-        "- plot_train_vs_step.png",
-        "- plot_validation_vs_time.png",
-    ])
-    (tier_dir / "report.md").write_text("\n".join(lines), encoding="utf-8")
-
-
-def _write_overall_report(run_dir: Path, benchmark: BenchmarkConfig, tier_summaries: list[dict]):
-    lines = [
-        f"# {benchmark.run_name}",
-        "",
-        "## Tier Summary",
-        "",
-    ]
-    for summary in tier_summaries:
-        adamw = summary["best_configs"].get("adamw")
-        muon = summary["best_configs"].get("muon")
-        comparison = "n/a"
-        if adamw is not None and muon is not None:
-            gap = muon["final_test_distill_ce_mean"] - adamw["final_test_distill_ce_mean"]
-            comparison = f"muon-adamw test gap={gap:.6f}"
-        lines.append(f"- {summary['tier']}: {comparison}")
-    lines.extend([
-        "",
-        "## Plot",
-        "",
-        "![Final Test Distillation CE by Tier](plot_final_test_loss_by_tier.png)",
-    ])
-    (run_dir / "report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def _single_build_config(benchmark_name: str, tier: TierConfig) -> Config:
@@ -736,7 +684,6 @@ def _run_tier(benchmark: BenchmarkConfig, tier: TierConfig, run_dir: Path, force
         "best_configs": best_configs,
     }
     save_json(tier_dir / "tier_summary.json", tier_summary)
-    _write_tier_report(tier_dir, tier_summary)
     return tier_summary
 
 
@@ -755,7 +702,6 @@ def run_experiment(benchmark: BenchmarkConfig, run_dir: Path, force: bool = Fals
         progress_bar.close()
 
     _plot_overall_test_loss(run_dir, tier_summaries, benchmark.optimizers)
-    _write_overall_report(run_dir, benchmark, tier_summaries)
 
     summary = {
         "benchmark": benchmark.to_dict(),

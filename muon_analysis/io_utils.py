@@ -13,6 +13,7 @@ except ImportError:
 
 
 def _numpy_array_to_cupy(array):
+    # Restore bf16 arrays saved through NumPy's raw-void representation.
     if array.dtype.kind == "V" and array.dtype.itemsize == 2 and ml_dtypes is not None:
         array = array.view(ml_dtypes.bfloat16)
     return cp.asarray(array)
@@ -27,6 +28,7 @@ def atomic_write(path, writer):
 
     try:
         written_path = writer(tmp_path)
+        # Move into place atomically to avoid partial files on interruption.
         os.replace(written_path or tmp_path, path)
     finally:
         if os.path.exists(tmp_path):

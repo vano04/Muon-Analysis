@@ -11,6 +11,7 @@ class Teacher(MLP_AR):
 
         u = ctx_to_onehot_concat(ctx_tokens, self.V, self.dtype)
         logits = self.forward_logits(u)
+        # Temperature scaling before categorical sampling.
         probs = stable_softmax(logits / temp, axis=1)
         return sample_categorical(rng, probs)
 
@@ -26,6 +27,7 @@ class Teacher(MLP_AR):
         else:
             tokens[:, :self.K] = rng.integers(0, self.V, size=(int(B), self.K), dtype=cp.int32)
 
+        # Autoregressive rollout from left to right.
         for t in range(self.K, int(T)):
             ctx_tokens = tokens[:, t - self.K:t]
             tokens[:, t] = self.sample_next(ctx_tokens, rng, temperature=temperature)

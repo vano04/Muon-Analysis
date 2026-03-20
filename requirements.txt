@@ -1,0 +1,7 @@
+# CuPy GPU wheel for NVIDIA CUDA 13.x runtimes.
+# If you are on a different CUDA major, replace with the matching wheel name (e.g. cupy-cuda12x).
+cupy-cuda13x
+
+ml-dtypes
+tqdm
+matplotlib

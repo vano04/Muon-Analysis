@@ -22,6 +22,7 @@ def newton_schulz(G, steps=3, eps=1e-7, state_dtype=None):
     state_dtype = cp.dtype(state_dtype)
 
     Xf = _float32_view(G)
+    # Normalize first for stable Newton-Schulz iterations.
     Xf = Xf / (cp.linalg.norm(Xf) + eps)
 
     t = Xf.shape[0] > Xf.shape[1]
@@ -120,6 +121,7 @@ class Muon:
 
 class MuonHybrid:
     def __init__(self, params, lr=1e-3, weight_decay=0.0, momentum=0.9, ns_steps=3, eps=1e-7, ns_state_dtype=None, nesterov=True):
+        # Muon for matrix-like params, AdamW for vectors/scalars.
         self._muon_indices = [idx for idx, param in enumerate(params) if param.ndim >= 2]
         self._adamw_indices = [idx for idx, param in enumerate(params) if param.ndim < 2]
         self._muon = None
@@ -160,6 +162,7 @@ class MuonHybrid:
         return params
 
 def build_optimizer(name, params, lr, weight_decay, muon_ns_steps=3):
+    # Small factory used by training and benchmark scripts.
     name = str(name).lower()
     if name == "adamw":
         return AdamW(params, lr=lr, weight_decay=weight_decay)

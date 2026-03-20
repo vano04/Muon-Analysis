@@ -19,6 +19,7 @@ def _resolve_json_path(path) -> Path:
         if resolved.exists():
             return resolved
 
+    # Keep original candidate for downstream error messages.
     return candidate
 
 def _filtered_kwargs(cls, data: dict) -> dict:
@@ -124,19 +125,7 @@ class Config:
 
     @classmethod
     def from_dict(cls, data: dict):
-        payload = dict(data)
-
-        if "B_eval" in payload:
-            payload.setdefault("B_val", payload["B_eval"])
-            payload.setdefault("B_test", payload["B_eval"])
-        if "eval_seed" in payload:
-            payload.setdefault("validation_seed", payload["eval_seed"])
-            payload.setdefault("test_seed", payload["eval_seed"] + 1)
-
-        if "optimizers" in payload and "optimizer" not in payload and payload["optimizers"]:
-            payload["optimizer"] = payload["optimizers"][0]
-
-        return cls(**_filtered_kwargs(cls, payload))
+        return cls(**_filtered_kwargs(cls, data))
 
     @classmethod
     def load_json(cls, path):
@@ -254,14 +243,7 @@ class TierConfig:
 
     @classmethod
     def from_dict(cls, data: dict):
-        payload = dict(data)
-        if "B_eval" in payload:
-            payload.setdefault("B_val", payload["B_eval"])
-            payload.setdefault("B_test", payload["B_eval"])
-        if "eval_seed" in payload:
-            payload.setdefault("validation_seed", payload["eval_seed"])
-            payload.setdefault("test_seed", payload["eval_seed"] + 1)
-        return cls(**_filtered_kwargs(cls, payload))
+        return cls(**_filtered_kwargs(cls, data))
 
 
 @dataclass
@@ -276,6 +258,7 @@ class BenchmarkConfig:
     def __post_init__(self):
         if not isinstance(self.tuning, TuningConfig):
             self.tuning = TuningConfig.from_dict(self.tuning)
+        # Accept dict payloads and normalize to TierConfig objects.
         self.tiers = [tier if isinstance(tier, TierConfig) else TierConfig.from_dict(tier) for tier in self.tiers]
         self.validate()
 

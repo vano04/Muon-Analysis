@@ -36,6 +36,7 @@ def normalize_dtype_name(name: str) -> str:
     if not isinstance(name, str):
         raise TypeError(f"dtype name must be a string, got {type(name)}")
 
+    # Normalize common aliases like fp32, bf16, double.
     normalized = _CANONICAL_ALIASES.get(name.strip().lower())
     if normalized is None:
         raise ValueError(
@@ -54,6 +55,7 @@ def normalize_dtype_name(name: str) -> str:
 
 def resolve_dtype(name: str):
     normalized = normalize_dtype_name(name)
+    # Prefer direct CuPy attribute, fallback to dtype constructor.
     dtype = getattr(cp, normalized, None)
     if dtype is None:
         try:

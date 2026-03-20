@@ -2,6 +2,11 @@
 
 CuPy-only teacher-student autoregressive MLP experiments for comparing AdamW and Muon without PyTorch.
 
+Install required packages with:
+```bash
+pip install -r requirements.txt
+```
+
 ## Layout
 
 - `muon_analysis/`: reusable package code
