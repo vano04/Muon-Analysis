@@ -162,42 +162,24 @@ def _save_csv(path: Path, rows: list[dict]):
             writer.writerow(row)
 
 
+def _plot_curve(out_path: Path, optimizer_curves: dict[str, list[dict]], x_key: str, y_key: str, xlabel: str, ylabel: str, title: str):
+    plt.figure(figsize=(9, 5))
+    for optimizer, rows in optimizer_curves.items():
+        plt.plot([row[x_key] for row in rows], [row[y_key] for row in rows], linewidth=2.0, label=optimizer)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=160)
+    plt.close()
+
+
 def _plot_tier_curves(tier_dir: Path, optimizer_curves: dict[str, list[dict]]):
-    plt.figure(figsize=(9, 5))
-    for optimizer, rows in optimizer_curves.items():
-        plt.plot([row["step"] for row in rows], [row["mean_val_distill_ce"] for row in rows], linewidth=2.0, label=optimizer)
-    plt.xlabel("Step")
-    plt.ylabel("Validation Distillation CE")
-    plt.title("Validation Distillation CE vs Step")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(tier_dir / "plot_validation_vs_step.png", dpi=160)
-    plt.close()
-
-    plt.figure(figsize=(9, 5))
-    for optimizer, rows in optimizer_curves.items():
-        plt.plot([row["step"] for row in rows], [row["mean_train_distill_ce"] for row in rows], linewidth=2.0, label=optimizer)
-    plt.xlabel("Step")
-    plt.ylabel("Train Distillation CE")
-    plt.title("Train Distillation CE vs Step")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(tier_dir / "plot_train_vs_step.png", dpi=160)
-    plt.close()
-
-    plt.figure(figsize=(9, 5))
-    for optimizer, rows in optimizer_curves.items():
-        plt.plot([row["mean_elapsed_sec"] for row in rows], [row["mean_val_distill_ce"] for row in rows], linewidth=2.0, label=optimizer)
-    plt.xlabel("Elapsed Seconds")
-    plt.ylabel("Validation Distillation CE")
-    plt.title("Validation Distillation CE vs Time")
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(tier_dir / "plot_validation_vs_time.png", dpi=160)
-    plt.close()
+    _plot_curve(tier_dir / "plot_validation_vs_step.png", optimizer_curves, "step", "mean_val_distill_ce", "Step", "Validation Distillation CE", "Validation Distillation CE vs Step")
+    _plot_curve(tier_dir / "plot_train_vs_step.png", optimizer_curves, "step", "mean_train_distill_ce", "Step", "Train Distillation CE", "Train Distillation CE vs Step")
+    _plot_curve(tier_dir / "plot_validation_vs_time.png", optimizer_curves, "mean_elapsed_sec", "mean_val_distill_ce", "Elapsed Seconds", "Validation Distillation CE", "Validation Distillation CE vs Time")
 
 
 def _plot_overall_test_loss(run_dir: Path, tier_summaries: list[dict], optimizers: list[str]):
@@ -323,12 +305,6 @@ class _BenchmarkProgressDisplay:
         self.main.close()
 
 
-def _update_progress(progress_display: _BenchmarkProgressDisplay | None, tier: TierConfig, optimizer: str, lr: float, weight_decay: float):
-    if progress_display is None:
-        return
-    progress_display.update_trial(tier, optimizer, lr, weight_decay)
-
-
 def _run_trial(
     benchmark_name: str,
     tier: TierConfig,
@@ -378,7 +354,8 @@ def _run_trial(
         "trial_dir": str(trial_dir),
     }
     save_json(summary_path, trial_summary)
-    _update_progress(progress_bar, tier, optimizer, lr, weight_decay)
+    if progress_bar is not None:
+        progress_bar.update_trial(tier, optimizer, lr, weight_decay)
     return trial_summary
 
 
@@ -482,7 +459,8 @@ def _run_trial_group(
             if progress_bar is not None and slot_index < worker_slots:
                 progress_bar.refresh_worker_step(slot_index, state["step_log"])
                 progress_bar.finish_worker_trial(slot_index, f"done r{repeat_index + 1}/{tier.repeats}")
-            _update_progress(progress_bar, tier, optimizer, lr, weight_decay)
+            if progress_bar is not None:
+                progress_bar.update_trial(tier, optimizer, lr, weight_decay)
             _submit_one(slot_index)
 
     return trials
@@ -555,7 +533,6 @@ def _run_tier(benchmark: BenchmarkConfig, tier: TierConfig, run_dir: Path, force
         progress_bar.set_phase(f"{tier.name} running trials")
     tuning = benchmark.tier_tuning(tier)
 
-    trial_groups: dict[str, list[dict]] = {}
     max_parallel = max(1, benchmark.max_parallel_trials)
     parallel_executor = None
     if max_parallel > 1:
@@ -564,99 +541,22 @@ def _run_tier(benchmark: BenchmarkConfig, tier: TierConfig, run_dir: Path, force
             mp_context=multiprocessing.get_context("spawn"),
         )
     try:
-        if parallel_executor is None:
-            for optimizer in benchmark.optimizers:
-                for lr in tuning.learning_rates:
-                    for weight_decay in tuning.weight_decays:
-                        group_key = f"{optimizer}|{lr}|{weight_decay}"
-                        trial_groups[group_key] = _run_trial_group(
-                            benchmark,
-                            tier,
-                            tier_dir,
-                            optimizer,
-                            lr,
-                            weight_decay,
-                            force,
-                            progress_bar=progress_bar,
-                            executor=None,
-                        )
-        else:
-            trial_specs = []
-            for optimizer in benchmark.optimizers:
-                for lr in tuning.learning_rates:
-                    for weight_decay in tuning.weight_decays:
-                        group_key = f"{optimizer}|{lr}|{weight_decay}"
-                        trial_groups[group_key] = [None] * tier.repeats
-                        for repeat_index in range(tier.repeats):
-                            trial_specs.append({
-                                "group_key": group_key,
-                                "optimizer": optimizer,
-                                "lr": lr,
-                                "weight_decay": weight_decay,
-                                "repeat_index": repeat_index,
-                            })
-
-            next_spec_index = 0
-            running: dict = {}
-            worker_slots = min(max_parallel, len(progress_bar.worker_bars)) if progress_bar is not None else 0
-
-            def _submit_one(slot_index: int) -> bool:
-                nonlocal next_spec_index
-                if next_spec_index >= len(trial_specs):
-                    return False
-                spec = trial_specs[next_spec_index]
-                next_spec_index += 1
-                payload = {
-                    "benchmark_name": benchmark.run_name,
-                    "tier": tier.to_dict(),
-                    "tier_dir": str(tier_dir),
-                    "optimizer": spec["optimizer"],
-                    "lr": spec["lr"],
-                    "weight_decay": spec["weight_decay"],
-                    "repeat_index": spec["repeat_index"],
-                    "force": force,
-                }
-                future = parallel_executor.submit(_run_trial_worker, payload)
-                trial_dir = _trial_dir(tier_dir, spec["optimizer"], spec["lr"], spec["weight_decay"], spec["repeat_index"])
-                running[future] = {
-                    "group_key": spec["group_key"],
-                    "optimizer": spec["optimizer"],
-                    "lr": spec["lr"],
-                    "weight_decay": spec["weight_decay"],
-                    "repeat_index": spec["repeat_index"],
-                    "slot_index": slot_index,
-                    "step_log": trial_dir / "step_log.csv",
-                }
-                if progress_bar is not None and slot_index < worker_slots:
-                    label = f"{spec['optimizer']} {tier.name} r{spec['repeat_index'] + 1}/{tier.repeats}"
-                    progress_bar.start_worker_trial(slot_index, label, tier.steps)
-                return True
-
-            for slot_index in range(max_parallel):
-                if not _submit_one(slot_index):
-                    break
-
-            while running:
-                done, _ = wait(list(running.keys()), timeout=0.5, return_when=FIRST_COMPLETED)
-                if progress_bar is not None:
-                    for state in running.values():
-                        slot_index = state["slot_index"]
-                        if slot_index < worker_slots:
-                            progress_bar.refresh_worker_step(slot_index, state["step_log"])
-                if not done:
-                    continue
-
-                for future in done:
-                    state = running.pop(future)
-                    group_key = state["group_key"]
-                    repeat_index = state["repeat_index"]
-                    slot_index = state["slot_index"]
-                    trial_groups[group_key][repeat_index] = future.result()
-                    if progress_bar is not None and slot_index < worker_slots:
-                        progress_bar.refresh_worker_step(slot_index, state["step_log"])
-                        progress_bar.finish_worker_trial(slot_index, f"done r{repeat_index + 1}/{tier.repeats}")
-                    _update_progress(progress_bar, tier, state["optimizer"], state["lr"], state["weight_decay"])
-                    _submit_one(slot_index)
+        trial_groups: dict[str, list[dict]] = {}
+        for optimizer in benchmark.optimizers:
+            for lr in tuning.learning_rates:
+                for weight_decay in tuning.weight_decays:
+                    group_key = f"{optimizer}|{lr}|{weight_decay}"
+                    trial_groups[group_key] = _run_trial_group(
+                        benchmark,
+                        tier,
+                        tier_dir,
+                        optimizer,
+                        lr,
+                        weight_decay,
+                        force,
+                        progress_bar=progress_bar,
+                        executor=parallel_executor,
+                    )
     finally:
         if parallel_executor is not None:
             parallel_executor.shutdown(wait=True, cancel_futures=True)

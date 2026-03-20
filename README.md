@@ -23,35 +23,35 @@ pip install -r requirements.txt
 
 ## Example
 
-Run the full suite:
+Run the full suite (For same the results as report):
 
 ```bash
-python experiment1.py --config configs/benchmark_suite.json
+python experiment1.py --config configs/benchmark_full.json
 ```
 
 Run one tier only:
 
 ```bash
-python experiment1.py --config configs/benchmark_medium.json
+python experiment1.py --config configs/benchmark_suite1.json
 ```
 
 Run a smoke benchmark:
 
 ```bash
-python experiment1.py --config configs/smoke.json
+python experiment1.py --config configs/benchmark_smoke.json
 ```
 
 Single-trial utilities remain available when you want to inspect one exact setting:
 
 ```bash
-python build_teacher_eval.py --config configs/benchmark_small.json --run-name debug_trial
-python train.py --config configs/benchmark_500m_bf16_adamw.json --run-name legacy_single_trial
-python eval.py --config configs/benchmark_500m_bf16_adamw.json --run-name legacy_single_trial --split test
+python build_teacher_eval.py --config configs/benchmark_smoke.json --run-name debug_trial
+python train.py --config configs/benchmark_smoke.json --run-name legacy_single_trial
+python eval.py --config configs/benchmark_smoke.json --run-name legacy_single_trial --split test
 ```
 
 Multi process execution (Only run the full benchmark suite with this if your GPU has >=32gb of VRAM):
 ```bash
-python experiment1.py --config benchmark_suite.json --max-parallel-trials 3 --force
+python experiment1.py --config configs/benchmark_full.json --max-parallel-trials 3 --force
 ```
 
 Remove `--force` to continue tier wise and use `--force` if you want to recompute everything.

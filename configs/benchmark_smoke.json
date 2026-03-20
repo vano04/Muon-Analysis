@@ -1,0 +1,40 @@
+{
+  "run_name": "smoke",
+  "optimizers": ["adamw"],
+  "output_root": "results",
+  "max_parallel_trials": 1,
+  "tuning": {
+    "learning_rates": [0.001],
+    "weight_decays": [0.0]
+  },
+  "tiers": [
+    {
+      "name": "tiny",
+      "V": 8,
+      "K": 4,
+      "T": 16,
+      "width": 16,
+      "layers": 2,
+      "activation": "relu",
+      "dtype": "float32",
+      "temperature": 1.0,
+      "prefix_mode": "bos",
+      "bos_id": 0,
+      "teacher_seed": 42,
+      "validation_seed": 43,
+      "test_seed": 44,
+      "student_seeds": [100],
+      "train_seeds": [200],
+      "B_train": 8,
+      "B_val": 8,
+      "B_test": 8,
+      "steps": 10,
+      "eval_every": 5,
+      "log_every": 5,
+      "finite_check_every": 5,
+      "step_log_flush_every": 5,
+      "muon_ns_steps": 3,
+      "num_threads": 1
+    }
+  ]
+}
